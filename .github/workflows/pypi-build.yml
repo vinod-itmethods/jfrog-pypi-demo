@@ -1,0 +1,62 @@
+name: PyPI Build and Publish to Artifactory
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read  
+  id-token: write  
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install JFrog CLI
+        run: |
+          curl -fL https://getcli.jfrog.io | sh
+          chmod +x jfrog
+          mv jfrog /usr/local/bin/
+
+      - name: Authenticate JFrog CLI Using Access Token
+        env:
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: |
+          export JFROG_CLI_OFFER_CONFIG=false
+          jfrog config add my-artifactory \
+            --url=https://artifactory.stage.0658b-techopscore.com \
+            --access-token=$JFROG_TOKEN \
+            --interactive=false
+
+      - name: Configure PyPI Authentication
+        env:
+          PYPI_AUTH_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: |
+          echo "[distutils]" > ~/.pypirc
+          echo "index-servers =" >> ~/.pypirc
+          echo "    pypi-opensource" >> ~/.pypirc
+          echo "    pypi-appcode-dev" >> ~/.pypirc
+          echo "[pypi-opensource]" >> ~/.pypirc
+          echo "repository=https://artifactory.stage.0658b-techopscore.com/artifactory/api/pypi/pypi-opensource/" >> ~/.pypirc
+          echo "username=__token__" >> ~/.pypirc
+          echo "password=$PYPI_AUTH_TOKEN" >> ~/.pypirc
+          echo "[pypi-appcode-dev]" >> ~/.pypirc
+          echo "repository=https://artifactory.stage.0658b-techopscore.com/artifactory/api/pypi/pypi-appcode-dev/" >> ~/.pypirc
+          echo "username=__token__" >> ~/.pypirc
+          echo "password=$PYPI_AUTH_TOKEN" >> ~/.pypirc
+
+      - name: Install Dependencies from Artifactory
+        run: |
+          pip install --no-cache-dir --index-url=https://artifactory.stage.0658b-techopscore.com/artifactory/api/pypi/pypi-opensource/simple -r requirements.txt
+
+      - name: Build Package
+        run: python setup.py sdist
+
+      - name: Publish to Artifactory
+        run: |
+          jfrog rt upload "dist/*" "pypi-appcode-dev/"
